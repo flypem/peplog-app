@@ -37,7 +37,7 @@ export async function startCheckout(interval = "monthly") {
 // can update payment info or cancel — you don't build cancellation UI yourself.
 export async function openBillingPortal() {
   const { url } = await authedFetch("/api/create-portal-session", {
-    returnUrl: `${window.location.origin}/`,
+    returnUrl: `${window.location.origin}/?billing=return`,
   });
   window.location.href = url;
 }

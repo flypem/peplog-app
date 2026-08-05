@@ -207,6 +207,8 @@ export default function PepLog() {
   const [vials, setVials] = useState([]);
   const [log, setLog] = useState([]);
   const [plan, setPlan] = useState("free");
+  const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
+  const [currentPeriodEnd, setCurrentPeriodEnd] = useState(null);
   const [customSites, setCustomSites] = useState([]);
   const [ready, setReady] = useState(false);
   const [paywall, setPaywall] = useState(null);
@@ -252,7 +254,9 @@ export default function PepLog() {
       const cs = await loadKey("peplog:customSites", []);
       setVials(v);
       setLog(l);
-      setPlan(p);
+      setPlan(p.plan);
+      setCancelAtPeriodEnd(p.cancelAtPeriodEnd);
+      setCurrentPeriodEnd(p.currentPeriodEnd);
       setCustomSites(cs);
       setReady(true);
     })();
@@ -267,13 +271,29 @@ export default function PepLog() {
     const poll = setInterval(async () => {
       attempts++;
       const p = await fetchPlan();
-      if (p === "pro" || attempts >= 6) {
-        setPlan(p);
+      if (p.plan === "pro" || attempts >= 6) {
+        setPlan(p.plan);
+        setCancelAtPeriodEnd(p.cancelAtPeriodEnd);
+        setCurrentPeriodEnd(p.currentPeriodEnd);
         clearInterval(poll);
         window.history.replaceState({}, "", window.location.pathname);
       }
     }, 1500);
     return () => clearInterval(poll);
+  }, [session]);
+
+  // returning from the Billing Portal (e.g. after cancelling): refresh status
+  useEffect(() => {
+    if (!session) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") !== "return") return;
+    (async () => {
+      const p = await fetchPlan();
+      setPlan(p.plan);
+      setCancelAtPeriodEnd(p.cancelAtPeriodEnd);
+      setCurrentPeriodEnd(p.currentPeriodEnd);
+      window.history.replaceState({}, "", window.location.pathname);
+    })();
   }, [session]);
 
   useEffect(() => { if (ready) saveKey("peplog:vials", vials); }, [vials, ready]);
@@ -514,6 +534,8 @@ export default function PepLog() {
         {tab === "account" && (
           <AccountTab
             isPro={isPro}
+            cancelAtPeriodEnd={cancelAtPeriodEnd}
+            currentPeriodEnd={currentPeriodEnd}
             vials={vials}
             vialStats={vialStats}
             log={log}
@@ -1028,7 +1050,7 @@ function EmptyState({ icon: Icon, title, body, action }) {
 }
 
 // ---------- Account tab ----------
-function AccountTab({ isPro, vials, vialStats, log, customSites, userEmail, onAddSite, onRemoveSite, onUpgrade, onDowngrade, onExport, onSignOut }) {
+function AccountTab({ isPro, cancelAtPeriodEnd, currentPeriodEnd, vials, vialStats, log, customSites, userEmail, onAddSite, onRemoveSite, onUpgrade, onDowngrade, onExport, onSignOut }) {
   const [siteInput, setSiteInput] = useState("");
   const [billingInterval, setBillingInterval] = useState("annual"); // default to the better deal
 
@@ -1064,6 +1086,13 @@ function AccountTab({ isPro, vials, vialStats, log, customSites, userEmail, onAd
             </button>
           )}
         </div>
+        {isPro && cancelAtPeriodEnd && (
+          <div className="flex items-center gap-1.5 mt-3 text-[11px] rounded-lg px-2.5 py-2" style={{ background: "#FBEEE3", color: "#8A5A2B" }}>
+            <AlertTriangle size={12} />
+            Cancelled — you'll keep Pro through{" "}
+            {currentPeriodEnd ? new Date(currentPeriodEnd).toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "the end of this billing period"}, then it drops to Free.
+          </div>
+        )}
         {!isPro && (
           <div className="flex rounded-lg overflow-hidden mt-3" style={{ border: `1px solid ${LINE}` }}>
             <button onClick={() => setBillingInterval("monthly")} className="flex-1 py-1.5 text-xs font-medium" style={{ background: billingInterval === "monthly" ? INK : "white", color: billingInterval === "monthly" ? "white" : INK }}>
