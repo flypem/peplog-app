@@ -180,7 +180,7 @@ function simulateDaysRemaining(steps, freq, pos, mcgAvailable) {
 // ---------- Syringe visual ----------
 function SyringeGauge({ units, scale }) {
   const h = 220;
-  const w = 64;
+  const w = 80;
   const fillH = Math.max(0, Math.min(1, units / scale)) * (h - 20);
   const ticks = [];
   const step = scale <= 30 ? 5 : 10;
