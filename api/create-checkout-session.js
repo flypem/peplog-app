@@ -6,7 +6,9 @@ export default async function handler(req, res) {
   const user = await getUserFromRequest(req);
   if (!user) return res.status(401).json({ error: "Not signed in" });
 
-  const { successUrl, cancelUrl } = req.body || {};
+  const { successUrl, cancelUrl, interval } = req.body || {};
+  const priceId = interval === "annual" ? process.env.STRIPE_PRICE_ID_ANNUAL : process.env.STRIPE_PRICE_ID_MONTHLY;
+  if (!priceId) return res.status(400).json({ error: `Missing price id for interval "${interval}"` });
 
   // Reuse an existing Stripe customer if we already made one for this user.
   const { data: profile } = await supabaseAdmin
@@ -30,11 +32,9 @@ export default async function handler(req, res) {
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
+    line_items: [{ price: priceId, quantity: 1 }],
     success_url: successUrl,
     cancel_url: cancelUrl,
-    // Belt-and-suspenders: also stamp the user id on the subscription itself,
-    // in case a customer somehow gets detached from its metadata later.
     subscription_data: { metadata: { supabase_user_id: user.id } },
   });
 
