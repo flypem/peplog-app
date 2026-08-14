@@ -26,7 +26,7 @@ export default function Auth() {
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2 mb-6 justify-center">
           <FlaskConical size={24} color="#127D77" />
-          <h1 className="text-xl font-semibold" style={{ color: "#1C2B33" }}>PepLog</h1>
+          <h1 className="text-xl font-semibold" style={{ color: "#1C2B33" }}>Flyptide</h1>
         </div>
 
         {sent ? (

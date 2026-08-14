@@ -88,16 +88,21 @@ function nextSite(log, sites) {
   return idx === -1 ? sites[0] : sites[(idx + 1 + sites.length) % sites.length];
 }
 
+function csvEscape(val) {
+  const s = String(val ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 function exportCSV(log) {
-  const header = "Date,Item,Site,Dose\n";
+  const header = "Date,Item,Site,Dose,Notes\n";
   const rows = log
-    .map((e) => `${new Date(e.date).toISOString()},${e.name},${e.site || ""},${e.doseAmount}${e.doseUnit}`)
+    .map((e) => [new Date(e.date).toISOString(), e.name, e.site || "", `${e.doseAmount}${e.doseUnit}`, e.notes || ""].map(csvEscape).join(","))
     .join("\n");
   const blob = new Blob([header + rows], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "peplog-history.csv";
+  a.download = "flyptide-history.csv";
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -200,7 +205,7 @@ function SyringeGauge({ units, scale }) {
 }
 
 // ---------- main app ----------
-export default function PepLog() {
+export default function Flyptide() {
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [tab, setTab] = useState("calc");
@@ -226,6 +231,8 @@ export default function PepLog() {
   const [vialsInStock, setVialsInStock] = useState("1");
   const [step1Weeks, setStep1Weeks] = useState("");
   const [scheduleSteps, setScheduleSteps] = useState([]);
+  const [solveMode, setSolveMode] = useState("water"); // "water" (normal) or "units" (reverse-solve)
+  const [desiredUnits, setDesiredUnits] = useState("");
 
   const [logModalVial, setLogModalVial] = useState(null);
   const [editingVial, setEditingVial] = useState(null);
@@ -248,10 +255,10 @@ export default function PepLog() {
     if (!session) return;
     (async () => {
       await ensureProfileExists();
-      const v = await loadKey("peplog:vials", []);
-      const l = await loadKey("peplog:log", []);
+      const v = await loadKey("flyptide:vials", []);
+      const l = await loadKey("flyptide:log", []);
       const p = await fetchPlan();
-      const cs = await loadKey("peplog:customSites", []);
+      const cs = await loadKey("flyptide:customSites", []);
       setVials(v);
       setLog(l);
       setPlan(p.plan);
@@ -296,9 +303,9 @@ export default function PepLog() {
     })();
   }, [session]);
 
-  useEffect(() => { if (ready) saveKey("peplog:vials", vials); }, [vials, ready]);
-  useEffect(() => { if (ready) saveKey("peplog:log", log); }, [log, ready]);
-  useEffect(() => { if (ready) saveKey("peplog:customSites", customSites); }, [customSites, ready]);
+  useEffect(() => { if (ready) saveKey("flyptide:vials", vials); }, [vials, ready]);
+  useEffect(() => { if (ready) saveKey("flyptide:log", log); }, [log, ready]);
+  useEffect(() => { if (ready) saveKey("flyptide:customSites", customSites); }, [customSites, ready]);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -322,14 +329,21 @@ export default function PepLog() {
   }
 
   const calc = useMemo(() => {
-    const water = parseFloat(bacWater) || 0;
     const dMcg = toMcg(parseFloat(doseAmount) || 0, doseUnit);
-    let conc, vMcg;
+    const desiredUnitsNum = parseFloat(desiredUnits) || 0;
+    let water = parseFloat(bacWater) || 0;
+    let conc, vMcg, solvedWater = null;
+
     if (itemType === "premixed") {
-      conc = toMcg(parseFloat(vialAmount) || 0, vialUnit); // entered directly, e.g. 200 mg/mL
-      vMcg = conc * water; // total content across the whole vial
+      conc = toMcg(parseFloat(vialAmount) || 0, vialUnit);
+      vMcg = conc * water;
     } else {
       vMcg = toMcg(parseFloat(vialAmount) || 0, vialUnit);
+      if (itemType === "vial" && solveMode === "units" && dMcg > 0 && desiredUnitsNum > 0) {
+        // reverse-solve: given a target dose and desired draw, back into the water needed
+        solvedWater = (vMcg * desiredUnitsNum) / (100 * dMcg);
+        water = solvedWater;
+      }
       conc = water > 0 ? vMcg / water : 0;
     }
     const doseMl = conc > 0 ? dMcg / conc : 0;
@@ -339,10 +353,10 @@ export default function PepLog() {
     const daysSupply = f > 0 && totalDoses > 0 ? (totalDoses / f) * 7 : 0;
     const cost = parseFloat(costPerVial) || 0;
     const costPerDose = totalDoses > 0 && cost > 0 ? cost / totalDoses : 0;
-    return { vMcg, water, dMcg, conc, doseMl, units, totalDoses, daysSupply, costPerDose };
-  }, [itemType, vialAmount, vialUnit, bacWater, doseAmount, doseUnit, freq, costPerVial]);
+    return { vMcg, water, dMcg, conc, doseMl, units, totalDoses, daysSupply, costPerDose, solvedWater };
+  }, [itemType, vialAmount, vialUnit, bacWater, doseAmount, doseUnit, freq, costPerVial, solveMode, desiredUnits]);
 
-  const valid = calc.conc > 0 && calc.dMcg > 0;
+  const valid = solveMode === "units" ? calc.solvedWater > 0 && calc.dMcg > 0 : calc.conc > 0 && calc.dMcg > 0;
   const scale = pickScale(calc.units || 0);
   const overfill = itemType !== "capsule" && valid && calc.units > 100;
 
@@ -367,7 +381,7 @@ export default function PepLog() {
     const type = itemType;
     const effUnit = type === "capsule" ? "capsule" : vialUnit;
     const effDoseUnit = type === "capsule" ? "capsule" : doseUnit;
-    const effWater = type === "capsule" ? 1 : parseFloat(bacWater) || 0;
+    const effWater = type === "capsule" ? 1 : (solveMode === "units" && calc.solvedWater > 0 ? calc.solvedWater : parseFloat(bacWater) || 0);
     const effAmount = type === "premixed" ? (parseFloat(vialAmount) || 0) * effWater : parseFloat(vialAmount) || 0;
     const v = {
       id: uid(),
@@ -393,6 +407,8 @@ export default function PepLog() {
     setVials((prev) => [v, ...prev]);
     setScheduleSteps([]);
     setStep1Weeks("");
+    setSolveMode("water");
+    setDesiredUnits("");
     setTab("inventory");
   }
 
@@ -413,8 +429,9 @@ export default function PepLog() {
     setVials((prev) => prev.map((x) => (x.id === v.id ? { ...x, remindersOn: !x.remindersOn } : x)));
   }
 
-  function logDose(vial, site) {
-    const now = Date.now();
+  function logDose(vial, site, whenIso, notes) {
+    const when = whenIso ? new Date(whenIso) : new Date();
+    const now = when.getTime();
     const steps = buildSteps(vial);
     const pos = stepPosition(steps, vial.createdAt, now);
     const step = steps[pos.idx];
@@ -425,9 +442,10 @@ export default function PepLog() {
       site: site || null,
       doseAmount: step.amount,
       doseUnit: step.unit,
-      date: new Date().toISOString(),
+      date: when.toISOString(),
+      notes: notes || "",
     };
-    setLog((prev) => [entry, ...prev]);
+    setLog((prev) => [entry, ...prev].sort((a, b) => new Date(b.date) - new Date(a.date)));
     setVials((prev) => prev.map((v) => (v.id === vial.id ? {
       ...v,
       dosesUsed: (v.dosesUsed || 0) + 1,
@@ -497,7 +515,7 @@ export default function PepLog() {
         <div>
           <div className="flex items-center gap-2">
             <FlaskConical size={22} color={TEAL} strokeWidth={2} />
-            <h1 className="text-xl font-semibold tracking-tight">PepLog</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Flyptide</h1>
             <PlanBadge isPro={isPro} />
           </div>
           <p className="text-sm mt-0.5" style={{ color: "#6B7680" }}>Dosing math, supply tracking, dose log.</p>
@@ -512,6 +530,7 @@ export default function PepLog() {
             bacWater, setBacWater, doseAmount, setDoseAmount, doseUnit, setDoseUnit,
             freq, setFreq, costPerVial, setCostPerVial, vialsInStock, setVialsInStock,
             step1Weeks, setStep1Weeks, scheduleSteps, setScheduleSteps,
+            solveMode, setSolveMode, desiredUnits, setDesiredUnits,
             calc, valid, scale, overfill, saveVial,
           }} />
         )}
@@ -572,7 +591,7 @@ export default function PepLog() {
           sites={allSites}
           suggested={nextSite(log, allSites)}
           onClose={() => setLogModalVial(null)}
-          onConfirm={(site) => logDose(logModalVial, site)}
+          onConfirm={(site, whenIso, notes) => logDose(logModalVial, site, whenIso, notes)}
           onAddSite={addCustomSite}
         />
       )}
@@ -636,6 +655,7 @@ function CalcTab(props) {
     bacWater, setBacWater, doseAmount, setDoseAmount, doseUnit, setDoseUnit,
     freq, setFreq, costPerVial, setCostPerVial, vialsInStock, setVialsInStock,
     step1Weeks, setStep1Weeks, scheduleSteps, setScheduleSteps,
+    solveMode, setSolveMode, desiredUnits, setDesiredUnits,
     calc, valid, scale, overfill, saveVial,
   } = props;
 
@@ -705,13 +725,33 @@ function CalcTab(props) {
                 <UnitToggle value={vialUnit} onChange={setVialUnit} options={["mg", "mcg"]} />
               </div>
             </Field>
-            <Field label={itemType === "premixed" ? "Vial volume" : "BAC water"}>
-              <input type="number" inputMode="decimal" value={bacWater} onChange={(e) => setBacWater(e.target.value)} placeholder={itemType === "premixed" ? "10" : "2"} style={inputStyle} className="w-full font-mono" />
+            <Field label={itemType === "premixed" ? "Vial volume" : (solveMode === "units" ? "Desired draw (units)" : "BAC water")}>
+              {itemType === "vial" && solveMode === "units" ? (
+                <input type="number" inputMode="decimal" value={desiredUnits} onChange={(e) => setDesiredUnits(e.target.value)} placeholder="20" style={inputStyle} className="w-full font-mono" />
+              ) : (
+                <input type="number" inputMode="decimal" value={bacWater} onChange={(e) => setBacWater(e.target.value)} placeholder={itemType === "premixed" ? "10" : "2"} style={inputStyle} className="w-full font-mono" />
+              )}
             </Field>
           </div>
-          <p className="text-xs -mt-3" style={{ color: "#8A9299" }}>
-            {itemType === "premixed" ? "e.g. 200mg/mL in a 10mL vial — the amount per mL, then how many mL total" : "mL of bacteriostatic water added"}
-          </p>
+          {itemType === "vial" && (
+            <div className="flex items-center justify-between -mt-3">
+              <p className="text-xs" style={{ color: "#8A9299" }}>
+                {solveMode === "units" ? "Enter the syringe units you want to draw — we'll solve for the water" : "mL of bacteriostatic water added"}
+              </p>
+              <button
+                onClick={() => setSolveMode(solveMode === "units" ? "water" : "units")}
+                className="text-[11px] font-medium shrink-0 ml-2"
+                style={{ color: TEAL }}
+              >
+                {solveMode === "units" ? "← Enter water directly" : "Solve for water instead →"}
+              </button>
+            </div>
+          )}
+          {itemType === "premixed" && (
+            <p className="text-xs -mt-3" style={{ color: "#8A9299" }}>
+              e.g. 200mg/mL in a 10mL vial — the amount per mL, then how many mL total
+            </p>
+          )}
         </>
       )}
 
@@ -739,7 +779,7 @@ function CalcTab(props) {
           <input type="number" inputMode="numeric" min="1" value={vialsInStock} onChange={(e) => setVialsInStock(e.target.value)} placeholder="1" style={inputStyle} className="w-full font-mono" />
         </Field>
       </div>
-      <p className="text-xs -mt-3" style={{ color: "#8A9299" }}>If you have more than one on hand, PepLog rolls from one to the next automatically.</p>
+      <p className="text-xs -mt-3" style={{ color: "#8A9299" }}>If you have more than one on hand, Flyptide rolls from one to the next automatically.</p>
 
       {/* ---- dose schedule / titration ---- */}
       <div>
@@ -819,9 +859,19 @@ function CalcTab(props) {
         <div className="rounded-2xl p-4 flex gap-4 items-center" style={{ background: "white", border: `1px solid ${LINE}` }}>
           <SyringeGauge units={calc.units} scale={scale} />
           <div className="flex-1 space-y-2">
-            <Stat label="Concentration" value={fmtConc(calc.conc)} />
-            <Stat label={scheduleSteps.length ? "Step 1 draw" : "Draw to"} value={`${fmt(calc.units, 1)} units`} big />
-            <Stat label="Volume" value={`${fmt(calc.doseMl, 3)} mL`} />
+            {solveMode === "units" ? (
+              <>
+                <Stat label="Water needed" value={`${fmt(calc.water, 2)} mL`} big />
+                <Stat label="Concentration" value={fmtConc(calc.conc)} />
+                <Stat label="Draw" value={`${fmt(calc.units, 1)} units`} />
+              </>
+            ) : (
+              <>
+                <Stat label="Concentration" value={fmtConc(calc.conc)} />
+                <Stat label={scheduleSteps.length ? "Step 1 draw" : "Draw to"} value={`${fmt(calc.units, 1)} units`} big />
+                <Stat label="Volume" value={`${fmt(calc.doseMl, 3)} mL`} />
+              </>
+            )}
             <Stat label="Vial lasts" value={`${fmt(calc.daysSupply, 0)} days`} />
             {calc.costPerDose > 0 && <Stat label="Cost / dose" value={`$${fmt(calc.costPerDose, 2)}`} />}
             {overfill && (
@@ -1015,17 +1065,22 @@ function LogTab({ log, isPro, onExport }) {
       ) : (
         <div className="space-y-2">
           {log.map((entry) => (
-            <div key={entry.id} className="rounded-xl p-3 flex items-center justify-between" style={{ background: "white", border: `1px solid ${LINE}` }}>
-              <div>
-                <p className="text-sm font-medium">{entry.name}</p>
-                {entry.site && (
-                  <p className="text-[11px] flex items-center gap-1 mt-0.5" style={{ color: "#8A9299" }}><MapPin size={11} /> {entry.site}</p>
-                )}
+            <div key={entry.id} className="rounded-xl p-3" style={{ background: "white", border: `1px solid ${LINE}` }}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">{entry.name}</p>
+                  {entry.site && (
+                    <p className="text-[11px] flex items-center gap-1 mt-0.5" style={{ color: "#8A9299" }}><MapPin size={11} /> {entry.site}</p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-mono">{entry.doseAmount}{entry.doseUnit === "capsule" ? " caps" : entry.doseUnit}</p>
+                  <p className="text-[10px]" style={{ color: "#8A9299" }}>{new Date(entry.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-xs font-mono">{entry.doseAmount}{entry.doseUnit === "capsule" ? " caps" : entry.doseUnit}</p>
-                <p className="text-[10px]" style={{ color: "#8A9299" }}>{new Date(entry.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p>
-              </div>
+              {entry.notes && (
+                <p className="text-[11px] mt-1.5 pt-1.5" style={{ color: "#6B7680", borderTop: `1px solid ${LINE}` }}>{entry.notes}</p>
+              )}
             </div>
           ))}
         </div>
@@ -1203,10 +1258,21 @@ function LogModal({ vial, stats, sites, suggested, onClose, onConfirm, onAddSite
   const isCapsule = stats.type === "capsule";
   const [site, setSite] = useState(suggested);
   const [newSite, setNewSite] = useState("");
+  const [showMore, setShowMore] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const [whenDate, setWhenDate] = useState(today);
+  const [notes, setNotes] = useState("");
   const scale = pickScale(stats.currentUnits || 0);
+  const minDate = vial.createdAt ? new Date(vial.createdAt).toISOString().slice(0, 10) : undefined;
+  const isBackdated = whenDate !== today;
 
   function addSite() {
     if (newSite.trim()) { onAddSite(newSite.trim()); setSite(newSite.trim()); setNewSite(""); }
+  }
+
+  function confirm() {
+    const whenIso = isBackdated ? `${whenDate}T12:00:00` : null;
+    onConfirm(isCapsule ? null : site, whenIso, notes.trim());
   }
 
   return (
@@ -1253,7 +1319,21 @@ function LogModal({ vial, stats, sites, suggested, onClose, onConfirm, onAddSite
           </>
         )}
 
-        <button onClick={() => onConfirm(isCapsule ? null : site)} className="w-full mt-4 rounded-xl py-3 font-medium text-white" style={{ background: INK }}>
+        <button onClick={() => setShowMore(!showMore)} className="text-[11px] font-medium mt-3 flex items-center gap-1" style={{ color: TEAL }}>
+          <CalendarClock size={11} /> {showMore ? "Hide date & notes" : "Log for a different date, add notes"}
+        </button>
+        {showMore && (
+          <div className="mt-2 space-y-2.5">
+            <Field label="Date">
+              <input type="date" value={whenDate} min={minDate} max={today} onChange={(e) => setWhenDate(e.target.value)} style={inputStyle} className="w-full" />
+            </Field>
+            <Field label="Notes (optional)">
+              <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. mild redness at site" style={inputStyle} className="w-full text-sm" />
+            </Field>
+          </div>
+        )}
+
+        <button onClick={confirm} className="w-full mt-4 rounded-xl py-3 font-medium text-white" style={{ background: INK }}>
           {isCapsule ? "Confirm taken" : "Confirm dose logged"}
         </button>
       </div>

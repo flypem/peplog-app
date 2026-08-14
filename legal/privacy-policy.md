@@ -1,14 +1,17 @@
-# Privacy Policy — PepLog
+# Privacy Policy — Flyptide
 
-_Last updated: [DATE]_
+_Last updated: August 5, 2026_
 
 > **This is a starting template, not legal advice.** Have a lawyer review it
 > before you launch, especially the sections on health data and refunds —
-> requirements vary by country/state and change over time.
+> requirements vary by country/state and change over time. Two things still
+> need your input below: your support email and your governing state (both
+> marked with brackets).
 
 ## 1. Who we are
-PepLog ("we", "us") provides a dosing-calculation and supply-tracking tool
-at [yourdomain.com]. Contact: [your-email@yourdomain.com].
+Flyptide is a product of **Flypem Digital Ventures LLC** ("we", "us"),
+1309 Coffeen Avenue STE 1200, Sheridan, Wyoming 82801. Contact:
+contact@flyptide.app.
 
 ## 2. What we collect
 - **Account info:** your email address (used only to send sign-in links).
@@ -49,7 +52,7 @@ deletion to allow recovery of an accidental deletion, then it's permanently
 removed.
 
 ## 7. Children
-PepLog is not directed at anyone under 18. We don't knowingly collect data
+Flyptide is not directed at anyone under 18. We don't knowingly collect data
 from minors.
 
 ## 8. Not medical advice
@@ -62,4 +65,6 @@ We'll post updates here and adjust the "Last updated" date. Material
 changes will be flagged in-app.
 
 ## 10. Contact
-[your-email@yourdomain.com]
+Flypem Digital Ventures LLC
+1309 Coffeen Avenue STE 1200, Sheridan, Wyoming 82801
+contact@flyptide.app

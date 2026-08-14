@@ -6,20 +6,16 @@ import { supabase } from "./supabaseClient";
 export async function fetchPlan() {
   const { data: auth } = await supabase.auth.getUser();
   const user = auth?.user;
-  if (!user) return { plan: "free", cancelAtPeriodEnd: false, currentPeriodEnd: null };
+  if (!user) return "free";
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("plan, cancel_at_period_end, current_period_end")
+    .select("plan")
     .eq("user_id", user.id)
     .maybeSingle();
 
-  if (error || !data) return { plan: "free", cancelAtPeriodEnd: false, currentPeriodEnd: null };
-  return {
-    plan: data.plan || "free",
-    cancelAtPeriodEnd: !!data.cancel_at_period_end,
-    currentPeriodEnd: data.current_period_end,
-  };
+  if (error || !data) return "free";
+  return data.plan || "free";
 }
 
 export async function ensureProfileExists() {

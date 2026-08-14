@@ -34,21 +34,16 @@ export default async function handler(req, res) {
       case "checkout.session.completed": {
         await supabaseAdmin
           .from("profiles")
-          .update({ plan: "pro", stripe_subscription_id: obj.subscription, cancel_at_period_end: false })
+          .update({ plan: "pro", stripe_subscription_id: obj.subscription })
           .eq("stripe_customer_id", obj.customer);
         break;
       }
-      // Fires on renewals, upgrades/downgrades, cancellation scheduling, past_due, trial ending, etc.
+      // Fires on renewals, upgrades/downgrades, past_due, trial ending, etc.
       case "customer.subscription.updated": {
         const isActive = ["active", "trialing"].includes(obj.status);
         await supabaseAdmin
           .from("profiles")
-          .update({
-            plan: isActive ? "pro" : "free",
-            stripe_subscription_id: obj.id,
-            cancel_at_period_end: !!obj.cancel_at_period_end,
-            current_period_end: obj.current_period_end ? new Date(obj.current_period_end * 1000).toISOString() : null,
-          })
+          .update({ plan: isActive ? "pro" : "free", stripe_subscription_id: obj.id })
           .eq("stripe_customer_id", obj.customer);
         break;
       }
@@ -56,7 +51,7 @@ export default async function handler(req, res) {
       case "customer.subscription.deleted": {
         await supabaseAdmin
           .from("profiles")
-          .update({ plan: "free", cancel_at_period_end: false, current_period_end: null })
+          .update({ plan: "free" })
           .eq("stripe_customer_id", obj.customer);
         break;
       }

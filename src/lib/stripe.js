@@ -23,10 +23,8 @@ async function authedFetch(path, body) {
 }
 
 // Redirects the browser to Stripe Checkout for the Pro subscription.
-// interval: "monthly" | "annual"
-export async function startCheckout(interval = "monthly") {
+export async function startCheckout() {
   const { url } = await authedFetch("/api/create-checkout-session", {
-    interval,
     successUrl: `${window.location.origin}/?checkout=success`,
     cancelUrl: `${window.location.origin}/?checkout=cancelled`,
   });
@@ -37,7 +35,7 @@ export async function startCheckout(interval = "monthly") {
 // can update payment info or cancel — you don't build cancellation UI yourself.
 export async function openBillingPortal() {
   const { url } = await authedFetch("/api/create-portal-session", {
-    returnUrl: `${window.location.origin}/?billing=return`,
+    returnUrl: `${window.location.origin}/`,
   });
   window.location.href = url;
 }
