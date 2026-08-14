@@ -63,6 +63,16 @@ function pickScale(units) {
   return found || 100;
 }
 
+// Respects the user's preferred syringe size, but falls back to auto-fit
+// if the dose genuinely doesn't fit that syringe — never draw an overflowing gauge.
+function resolveScale(units, pref) {
+  if (pref && pref !== "auto") {
+    const preferred = parseInt(pref, 10);
+    if (SYRINGE_SCALES.includes(preferred) && units <= preferred) return preferred;
+  }
+  return pickScale(units);
+}
+
 function fmtConc(mcgPerMl) {
   if (mcgPerMl >= 1000) return `${fmt(mcgPerMl / 1000, 2)} mg/mL`;
   return `${fmt(mcgPerMl, 0)} mcg/mL`;
@@ -215,6 +225,7 @@ export default function Flyptide() {
   const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState(null);
   const [customSites, setCustomSites] = useState([]);
+  const [syringePref, setSyringePref] = useState("auto"); // "auto" | "30" | "50" | "100"
   const [ready, setReady] = useState(false);
   const [paywall, setPaywall] = useState(null);
 
@@ -259,12 +270,14 @@ export default function Flyptide() {
       const l = await loadKey("flyptide:log", []);
       const p = await fetchPlan();
       const cs = await loadKey("flyptide:customSites", []);
+      const sp = await loadKey("flyptide:syringePref", "auto");
       setVials(v);
       setLog(l);
       setPlan(p.plan);
       setCancelAtPeriodEnd(p.cancelAtPeriodEnd);
       setCurrentPeriodEnd(p.currentPeriodEnd);
       setCustomSites(cs);
+      setSyringePref(sp);
       setReady(true);
     })();
   }, [session]);
@@ -306,6 +319,7 @@ export default function Flyptide() {
   useEffect(() => { if (ready) saveKey("flyptide:vials", vials); }, [vials, ready]);
   useEffect(() => { if (ready) saveKey("flyptide:log", log); }, [log, ready]);
   useEffect(() => { if (ready) saveKey("flyptide:customSites", customSites); }, [customSites, ready]);
+  useEffect(() => { if (ready) saveKey("flyptide:syringePref", syringePref); }, [syringePref, ready]);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -357,7 +371,7 @@ export default function Flyptide() {
   }, [itemType, vialAmount, vialUnit, bacWater, doseAmount, doseUnit, freq, costPerVial, solveMode, desiredUnits]);
 
   const valid = solveMode === "units" ? calc.solvedWater > 0 && calc.dMcg > 0 : calc.conc > 0 && calc.dMcg > 0;
-  const scale = pickScale(calc.units || 0);
+  const scale = resolveScale(calc.units || 0, syringePref);
   const overfill = itemType !== "capsule" && valid && calc.units > 100;
 
   function selectType(t) {
@@ -560,6 +574,8 @@ export default function Flyptide() {
             log={log}
             customSites={customSites}
             userEmail={session.user.email}
+            syringePref={syringePref}
+            setSyringePref={setSyringePref}
             onAddSite={addCustomSite}
             onRemoveSite={removeCustomSite}
             onUpgrade={(interval) => startCheckout(interval).catch((e) => alert(e.message))}
@@ -590,6 +606,7 @@ export default function Flyptide() {
           stats={vialStats(logModalVial)}
           sites={allSites}
           suggested={nextSite(log, allSites)}
+          syringePref={syringePref}
           onClose={() => setLogModalVial(null)}
           onConfirm={(site, whenIso, notes) => logDose(logModalVial, site, whenIso, notes)}
           onAddSite={addCustomSite}
@@ -612,6 +629,7 @@ export default function Flyptide() {
         <ChangeDoseModal
           vial={changeDoseVial}
           stats={vialStats(changeDoseVial)}
+          syringePref={syringePref}
           onClose={() => setChangeDoseVial(null)}
           onSave={(amt, unit) => {
             const vial = changeDoseVial;
@@ -1105,7 +1123,7 @@ function EmptyState({ icon: Icon, title, body, action }) {
 }
 
 // ---------- Account tab ----------
-function AccountTab({ isPro, cancelAtPeriodEnd, currentPeriodEnd, vials, vialStats, log, customSites, userEmail, onAddSite, onRemoveSite, onUpgrade, onDowngrade, onExport, onSignOut }) {
+function AccountTab({ isPro, cancelAtPeriodEnd, currentPeriodEnd, vials, vialStats, log, customSites, userEmail, syringePref, setSyringePref, onAddSite, onRemoveSite, onUpgrade, onDowngrade, onExport, onSignOut }) {
   const [siteInput, setSiteInput] = useState("");
   const [billingInterval, setBillingInterval] = useState("annual"); // default to the better deal
 
@@ -1169,6 +1187,34 @@ function AccountTab({ isPro, cancelAtPeriodEnd, currentPeriodEnd, vials, vialSta
         <FeatureRow label="Dose reminders" included={isPro} />
         <FeatureRow label="CSV export of history" included={isPro} />
         <FeatureRow label="Spend insights" included={isPro} />
+      </div>
+
+      <div className="rounded-2xl p-4" style={{ background: "white", border: `1px solid ${LINE}` }}>
+        <p className="text-xs font-semibold mb-2">Preferred syringe size</p>
+        <p className="text-[11px] mb-2.5" style={{ color: "#8A9299" }}>
+          The gauge shows this size whenever your dose fits in it. If a dose is too big for your
+          chosen size, it automatically shows the next size up that actually fits.
+        </p>
+        <div className="grid grid-cols-4 gap-1.5">
+          {[
+            { id: "auto", label: "Auto" },
+            { id: "30", label: "0.3mL" },
+            { id: "50", label: "0.5mL" },
+            { id: "100", label: "1mL" },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => setSyringePref(opt.id)}
+              className="rounded-lg py-2 text-[11px] font-medium"
+              style={{
+                background: syringePref === opt.id ? TEAL : "#F3F2EE",
+                color: syringePref === opt.id ? "white" : INK,
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="rounded-2xl p-4" style={{ background: "white", border: `1px solid ${LINE}` }}>
@@ -1254,7 +1300,7 @@ function FeatureRow({ label, included, free }) {
 }
 
 // ---------- Log modal ----------
-function LogModal({ vial, stats, sites, suggested, onClose, onConfirm, onAddSite }) {
+function LogModal({ vial, stats, sites, suggested, syringePref, onClose, onConfirm, onAddSite }) {
   const isCapsule = stats.type === "capsule";
   const [site, setSite] = useState(suggested);
   const [newSite, setNewSite] = useState("");
@@ -1262,7 +1308,7 @@ function LogModal({ vial, stats, sites, suggested, onClose, onConfirm, onAddSite
   const today = new Date().toISOString().slice(0, 10);
   const [whenDate, setWhenDate] = useState(today);
   const [notes, setNotes] = useState("");
-  const scale = pickScale(stats.currentUnits || 0);
+  const scale = resolveScale(stats.currentUnits || 0, syringePref);
   const minDate = vial.createdAt ? new Date(vial.createdAt).toISOString().slice(0, 10) : undefined;
   const isBackdated = whenDate !== today;
 
@@ -1342,7 +1388,7 @@ function LogModal({ vial, stats, sites, suggested, onClose, onConfirm, onAddSite
 }
 
 // ---------- Change dose modal (effective today, up or down) ----------
-function ChangeDoseModal({ vial, stats, onClose, onSave }) {
+function ChangeDoseModal({ vial, stats, syringePref, onClose, onSave }) {
   const isCapsule = stats.type === "capsule";
   const [amount, setAmount] = useState("");
   const [unit, setUnit] = useState(vial.doseUnit);
@@ -1350,7 +1396,7 @@ function ChangeDoseModal({ vial, stats, onClose, onSave }) {
   const doseMl = stats.conc > 0 ? doseMcg / stats.conc : 0;
   const units = doseMl * 100;
   const valid = isCapsule ? parseFloat(amount) > 0 : parseFloat(amount) > 0 && stats.conc > 0;
-  const scale = pickScale(units || 0);
+  const scale = resolveScale(units || 0, syringePref);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(28,43,51,0.4)" }}>
