@@ -1,0 +1,27 @@
+name: Supabase Keep-Alive
+
+# Runs Mondays and Thursdays — well under Supabase's 7-day inactivity
+# threshold, with margin even if one run fails silently.
+on:
+  schedule:
+    - cron: "0 12 * * 1,4"
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab, to test
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Supabase to keep the project active
+        run: |
+          STATUS=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/kv_store?select=key&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+          echo "HTTP status: $STATUS"
+          cat /tmp/response.txt
+          # Any response (even a 401/403 from RLS) means the request reached
+          # the database, which is what actually resets the inactivity timer.
+          if [ "$STATUS" -ge 500 ]; then
+            echo "Server error — Supabase may be unreachable"
+            exit 1
+          fi
