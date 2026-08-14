@@ -302,18 +302,24 @@ export default function Flyptide() {
     return () => clearInterval(poll);
   }, [session]);
 
-  // returning from the Billing Portal (e.g. after cancelling): refresh status
+  // returning from the Billing Portal (e.g. after cancelling): refresh status.
+  // Polls a few times rather than once, since Stripe's webhook can take a
+  // second or two to land — a single immediate fetch can grab stale data.
   useEffect(() => {
     if (!session) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("billing") !== "return") return;
-    (async () => {
+    window.history.replaceState({}, "", window.location.pathname);
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
       const p = await fetchPlan();
       setPlan(p.plan);
       setCancelAtPeriodEnd(p.cancelAtPeriodEnd);
       setCurrentPeriodEnd(p.currentPeriodEnd);
-      window.history.replaceState({}, "", window.location.pathname);
-    })();
+      if (attempts >= 5) clearInterval(poll);
+    }, 1500);
+    return () => clearInterval(poll);
   }, [session]);
 
   useEffect(() => { if (ready) saveKey("flyptide:vials", vials); }, [vials, ready]);
