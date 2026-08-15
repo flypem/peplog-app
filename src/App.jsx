@@ -1292,6 +1292,12 @@ function AccountTab({ isPro, cancelAtPeriodEnd, currentPeriodEnd, vials, vialSta
           <LogOut size={12} /> Sign out
         </button>
       </div>
+
+      <div className="flex items-center justify-center gap-4 pt-1 pb-2">
+        <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-[11px]" style={{ color: "#8A9299" }}>Terms</a>
+        <span style={{ color: LINE }}>·</span>
+        <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-[11px]" style={{ color: "#8A9299" }}>Privacy</a>
+      </div>
     </div>
   );
 }
