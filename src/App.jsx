@@ -58,6 +58,17 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const fmt = (n, d = 1) =>
   Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: d }) : "—";
 
+// Local calendar date as YYYY-MM-DD — NOT toISOString(), which converts to
+// UTC first and can silently shift to the next/previous day depending on
+// the user's timezone (breaks date-input min/max ranges in the evening
+// for anyone west of UTC).
+function localDateStr(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function pickScale(units) {
   const found = SYRINGE_SCALES.find((s) => units <= s);
   return found || 100;
@@ -1317,11 +1328,12 @@ function LogModal({ vial, stats, sites, suggested, syringePref, onClose, onConfi
   const [site, setSite] = useState(suggested);
   const [newSite, setNewSite] = useState("");
   const [showMore, setShowMore] = useState(false);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateStr(new Date());
   const [whenDate, setWhenDate] = useState(today);
   const [notes, setNotes] = useState("");
   const scale = resolveScale(stats.currentUnits || 0, syringePref);
-  const minDate = vial.createdAt ? new Date(vial.createdAt).toISOString().slice(0, 10) : undefined;
+  const createdAtDate = vial.createdAt ? new Date(vial.createdAt) : null;
+  const minDate = createdAtDate && !isNaN(createdAtDate) ? localDateStr(createdAtDate) : undefined;
   const isBackdated = whenDate !== today;
 
   function addSite() {
