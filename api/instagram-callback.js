@@ -1,5 +1,5 @@
-// TEMPORARY DEBUG VERSION — shows exactly what we send and what Instagram
-// sends back, in full, instead of a generic error. Never logs the secret.
+import { saveInstagramCredentials } from "./_ig_lib.js";
+
 export default async function handler(req, res) {
   const { code, error, error_description } = req.query;
 
@@ -8,41 +8,40 @@ export default async function handler(req, res) {
   }
   if (!code) return res.status(400).send("Missing authorization code");
 
-  const sentParams = {
-    client_id: process.env.INSTAGRAM_APP_ID,
-    client_secret: "(hidden, length: " + (process.env.INSTAGRAM_APP_SECRET || "").length + ")",
-    grant_type: "authorization_code",
-    redirect_uri: process.env.INSTAGRAM_REDIRECT_URI,
-    code: code,
-  };
-
-  const form = new URLSearchParams({
-    client_id: process.env.INSTAGRAM_APP_ID,
-    client_secret: process.env.INSTAGRAM_APP_SECRET,
-    grant_type: "authorization_code",
-    redirect_uri: process.env.INSTAGRAM_REDIRECT_URI,
-    code,
-  });
-
-  let shortData, shortStatus;
   try {
+    const form = new URLSearchParams({
+      client_id: process.env.INSTAGRAM_APP_ID,
+      client_secret: process.env.INSTAGRAM_APP_SECRET,
+      grant_type: "authorization_code",
+      redirect_uri: process.env.INSTAGRAM_REDIRECT_URI,
+      code,
+    });
     const shortRes = await fetch("https://api.instagram.com/oauth/access_token", {
       method: "POST",
       body: form,
     });
-    shortStatus = shortRes.status;
-    shortData = await shortRes.json();
-  } catch (err) {
-    shortData = { fetchError: err.message };
-  }
+    const shortData = await shortRes.json();
+    if (!shortRes.ok) {
+      return res.status(400).send(`<pre>Token exchange failed: ${JSON.stringify(shortData, null, 2)}</pre>`);
+    }
+    const { access_token: shortToken, user_id: igUserId } = shortData;
 
-  res.setHeader("Content-Type", "text/plain");
-  res.send(
-    `=== What we sent to https://api.instagram.com/oauth/access_token ===\n` +
-    JSON.stringify(sentParams, null, 2) +
-    `\n\n=== Response status ===\n${shortStatus}\n` +
-    `\n=== Response body ===\n` +
-    JSON.stringify(shortData, null, 2) +
-    `\n\n=== Raw code received from Instagram (check for unexpected characters/truncation) ===\n${code}\n`
-  );
+    const longUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${process.env.INSTAGRAM_APP_SECRET}&access_token=${shortToken}`;
+    const longRes = await fetch(longUrl);
+    const longData = await longRes.json();
+    if (!longRes.ok) {
+      return res.status(400).send(`<pre>Long-lived token exchange failed: ${JSON.stringify(longData, null, 2)}</pre>`);
+    }
+
+    const expiresAt = new Date(Date.now() + longData.expires_in * 1000).toISOString();
+    await saveInstagramCredentials({
+      igUserId: String(igUserId),
+      accessToken: longData.access_token,
+      expiresAt,
+    });
+
+    res.send("✅ Instagram connected successfully. You can close this tab.");
+  } catch (err) {
+    res.status(500).send(`<pre>Error: ${err.message}</pre>`);
+  }
 }
