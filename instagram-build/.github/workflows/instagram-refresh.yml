@@ -1,0 +1,22 @@
+name: Instagram Token Refresh
+
+# Instagram tokens last 60 days; refreshing twice a month keeps a wide safety margin.
+on:
+  schedule:
+    - cron: "0 12 1,15 * *"
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh Instagram token
+        run: |
+          STATUS=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            "https://www.flyptide.app/api/instagram-refresh?secret=${{ secrets.INSTAGRAM_ADMIN_SECRET }}")
+          echo "HTTP status: $STATUS"
+          cat /tmp/response.txt
+          if [ "$STATUS" -ge 400 ]; then
+            echo "Refresh failed"
+            exit 1
+          fi
