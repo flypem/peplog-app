@@ -1,26 +1,18 @@
-// Builds the URL by hand rather than via URLSearchParams, to match
-// character-for-character the exact "Embed URL" format shown in Meta's own
-// App Dashboard (which does NOT percent-encode the redirect_uri value).
+// Facebook Login for Business uses a pre-created "Configuration" (config_id)
+// instead of a raw scope list — this is the modern, required approach for
+// this specific login product (confirmed directly from Meta's own docs).
 export default async function handler(req, res) {
   const { secret } = req.query;
   if (!process.env.INSTAGRAM_ADMIN_SECRET || secret !== process.env.INSTAGRAM_ADMIN_SECRET) {
     return res.status(403).send("Forbidden");
   }
 
-  const scope = [
-    "instagram_business_basic",
-    "instagram_business_manage_messages",
-    "instagram_business_manage_comments",
-    "instagram_business_content_publish",
-    "instagram_business_manage_insights",
-  ].join(",");
-
   const url =
-    `https://www.instagram.com/oauth/authorize?force_reauth=true` +
-    `&client_id=${process.env.INSTAGRAM_APP_ID}` +
+    `https://www.facebook.com/v21.0/dialog/oauth?` +
+    `client_id=${process.env.FACEBOOK_APP_ID}` +
     `&redirect_uri=${process.env.INSTAGRAM_REDIRECT_URI}` +
     `&response_type=code` +
-    `&scope=${scope}`;
+    `&config_id=${process.env.FACEBOOK_CONFIG_ID}`;
 
   res.redirect(url);
 }

@@ -1,5 +1,7 @@
 import { getInstagramCredentials } from "./_ig_lib.js";
 
+const GRAPH = "https://graph.facebook.com/v21.0";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
@@ -18,7 +20,7 @@ export default async function handler(req, res) {
 
   try {
     // Step 1 — create a media container
-    const containerRes = await fetch(`https://graph.instagram.com/v21.0/${creds.ig_user_id}/media`, {
+    const containerRes = await fetch(`${GRAPH}/${creds.ig_user_id}/media`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -33,7 +35,7 @@ export default async function handler(req, res) {
     }
 
     // Step 2 — publish the container
-    const publishRes = await fetch(`https://graph.instagram.com/v21.0/${creds.ig_user_id}/media_publish`, {
+    const publishRes = await fetch(`${GRAPH}/${creds.ig_user_id}/media_publish`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
