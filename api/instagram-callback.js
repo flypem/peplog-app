@@ -9,13 +9,16 @@ export default async function handler(req, res) {
   if (!code) return res.status(400).send("Missing authorization code");
 
   try {
-    const form = new URLSearchParams({
-      client_id: process.env.INSTAGRAM_APP_ID,
-      client_secret: process.env.INSTAGRAM_APP_SECRET,
-      grant_type: "authorization_code",
-      redirect_uri: process.env.INSTAGRAM_REDIRECT_URI,
-      code,
-    });
+    // Using FormData (multipart/form-data) instead of URLSearchParams
+    // (application/x-www-form-urlencoded) — matches Meta's own curl -F
+    // examples, which is a genuinely different encoding than -d/urlencoded.
+    const form = new FormData();
+    form.append("client_id", process.env.INSTAGRAM_APP_ID);
+    form.append("client_secret", process.env.INSTAGRAM_APP_SECRET);
+    form.append("grant_type", "authorization_code");
+    form.append("redirect_uri", process.env.INSTAGRAM_REDIRECT_URI);
+    form.append("code", code);
+
     const shortRes = await fetch("https://api.instagram.com/oauth/access_token", {
       method: "POST",
       body: form,
