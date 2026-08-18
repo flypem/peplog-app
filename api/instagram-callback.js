@@ -2,6 +2,11 @@ import { saveInstagramCredentials } from "./_ig_lib.js";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
+// Confirmed directly from the account-selection screen during authorization —
+// this Configuration grants access to specific Instagram accounts directly,
+// bypassing Facebook Pages entirely, so there's nothing to "discover" here.
+const IG_BUSINESS_ACCOUNT_ID = "17841437042960736";
+
 export default async function handler(req, res) {
   const { code, error, error_description } = req.query;
 
@@ -35,31 +40,21 @@ export default async function handler(req, res) {
       return res.status(400).send(`<pre>Long-lived token exchange failed: ${JSON.stringify(longData, null, 2)}</pre>`);
     }
 
-    // Step 3 — find the Facebook Page(s) this user manages
-    const pagesRes = await fetch(`${GRAPH}/me/accounts?access_token=${longData.access_token}`);
-    const pagesData = await pagesRes.json();
-    if (!pagesRes.ok || !pagesData.data || pagesData.data.length === 0) {
-      return res.status(400).send(`<pre>No Facebook Pages found: ${JSON.stringify(pagesData, null, 2)}</pre>`);
-    }
-    const page = pagesData.data[0]; // first Page — fine for a single-Page setup
-
-    // Step 4 — find the Instagram Business Account linked to that Page
-    const igRes = await fetch(`${GRAPH}/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`);
-    const igData = await igRes.json();
-    if (!igRes.ok || !igData.instagram_business_account) {
-      return res.status(400).send(`<pre>No linked Instagram Business account found on Page "${page.name}": ${JSON.stringify(igData, null, 2)}</pre>`);
+    // Step 3 — quick sanity check: confirm this token can actually see the
+    // Instagram account directly (proves the credential works before saving it)
+    const checkRes = await fetch(`${GRAPH}/${IG_BUSINESS_ACCOUNT_ID}?fields=username&access_token=${longData.access_token}`);
+    const checkData = await checkRes.json();
+    if (!checkRes.ok) {
+      return res.status(400).send(`<pre>Token can't access the Instagram account: ${JSON.stringify(checkData, null, 2)}</pre>`);
     }
 
-    // Page access tokens derived from a long-lived User token don't expire
-    // on their own (they last until the user revokes access), so no
-    // separate expiry tracking is needed here the way the other flow needed.
     await saveInstagramCredentials({
-      igUserId: igData.instagram_business_account.id,
-      accessToken: page.access_token,
-      expiresAt: null,
+      igUserId: IG_BUSINESS_ACCOUNT_ID,
+      accessToken: longData.access_token,
+      expiresAt: null, // long-lived Facebook user tokens don't expire on a fixed schedule
     });
 
-    res.send(`✅ Instagram connected successfully via Page "${page.name}". You can close this tab.`);
+    res.send(`✅ Instagram connected successfully as @${checkData.username}. You can close this tab.`);
   } catch (err) {
     res.status(500).send(`<pre>Error: ${err.message}</pre>`);
   }
