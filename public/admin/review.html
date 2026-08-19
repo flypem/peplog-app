@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flyptide — Review Drafts</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 20px; background: #FAFAF8; color: #1C2B33; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: #8A9299; font-size: 13px; margin-top: 0; margin-bottom: 20px; }
+  input[type=password] { width: 100%; padding: 10px; border: 1px solid #DEDBD2; border-radius: 8px; font-size: 14px; box-sizing: border-box; margin-bottom: 20px; font-family: inherit; }
+  .card { border: 1px solid #DEDBD2; border-radius: 10px; padding: 14px; margin-bottom: 14px; background: white; }
+  .card img { width: 100%; border-radius: 8px; margin-bottom: 10px; display: block; }
+  .card .when { color: #127D77; font-weight: 600; font-size: 12px; margin-bottom: 6px; }
+  .card .cap { font-size: 13px; color: #5B646C; line-height: 1.5; margin-bottom: 12px; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
+  .card .actions { display: flex; gap: 8px; }
+  .card button { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .approve { background: #127D77; color: white; }
+  .reject { background: #F3F2EE; color: #1C2B33; }
+  #empty, #loading { text-align: center; color: #8A9299; font-size: 14px; padding: 40px 0; }
+  button.load { width: 100%; padding: 12px; background: #1C2B33; color: white; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<h1>Review Drafts</h1>
+<p class="sub">Everything waiting for your approval. Approved posts publish automatically at their scheduled time — nothing else to do after that.</p>
+
+<input type="password" id="secret" placeholder="Paste your INSTAGRAM_ADMIN_SECRET" autocomplete="off">
+<button class="load" id="loadBtn">Load Drafts</button>
+
+<div id="list"></div>
+
+<script>
+const secretInput = document.getElementById('secret');
+const savedSecret = sessionStorage.getItem('ig_admin_secret');
+if (savedSecret) secretInput.value = savedSecret;
+
+async function loadDrafts() {
+  const secret = secretInput.value;
+  if (!secret) return alert('Enter your admin secret first');
+  sessionStorage.setItem('ig_admin_secret', secret);
+
+  const list = document.getElementById('list');
+  list.innerHTML = '<div id="loading">Loading...</div>';
+
+  try {
+    const res = await fetch(`/api/instagram-list-drafts?secret=${encodeURIComponent(secret)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+
+    if (!data.drafts || data.drafts.length === 0) {
+      list.innerHTML = '<div id="empty">Nothing waiting for review right now.</div>';
+      return;
+    }
+
+    list.innerHTML = '';
+    for (const d of data.drafts) {
+      const when = new Date(d.scheduled_for).toLocaleString(undefined, { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <img src="${d.image_url}">
+        <div class="when">${when}</div>
+        <div class="cap">${(d.caption || '').replace(/</g, '&lt;')}</div>
+        <div class="actions">
+          <button class="approve" data-id="${d.id}" data-action="approve">Approve</button>
+          <button class="reject" data-id="${d.id}" data-action="reject">Reject</button>
+        </div>`;
+      list.appendChild(card);
+    }
+
+    list.querySelectorAll('button[data-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const action = btn.dataset.action;
+        btn.disabled = true;
+        btn.textContent = '...';
+        const endpoint = action === 'approve' ? 'instagram-approve' : 'instagram-reject';
+        await fetch(`/api/${endpoint}?id=${id}&secret=${encodeURIComponent(secret)}`);
+        loadDrafts(); // refresh the list
+      });
+    });
+  } catch (err) {
+    list.innerHTML = `<div id="empty">Error: ${err.message}</div>`;
+  }
+}
+
+document.getElementById('loadBtn').addEventListener('click', loadDrafts);
+if (savedSecret) loadDrafts();
+</script>
+</body>
+</html>
