@@ -19,9 +19,7 @@
   .reject { background: #F3F2EE; color: #1C2B33; }
   .card button:disabled { opacity: 0.6; cursor: default; }
   .confirm { position: absolute; inset: 0; background: rgba(255,255,255,0.97); border-radius: 10px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 14px; font-weight: 600; padding: 20px; }
-  .confirm.ok { color: #127D77; }
-  .confirm.rej { color: #8A9299; }
-  .confirm.err { color: #C0392B; }
+  .confirm.ok { color: #127D77; } .confirm.rej { color: #8A9299; } .confirm.err { color: #C0392B; }
   #empty, #loading { text-align: center; color: #8A9299; font-size: 14px; padding: 40px 0; }
   button.load { width: 100%; padding: 12px; background: #1C2B33; color: white; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; margin-bottom: 20px; }
 </style>
@@ -49,7 +47,7 @@ async function loadDrafts() {
   list.innerHTML = '<div id="loading">Loading...</div>';
 
   try {
-    const res = await fetch(`/api/instagram-list-drafts?secret=${encodeURIComponent(secret)}`);
+    const res = await fetch(`/api/instagram-drafts?secret=${encodeURIComponent(secret)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(JSON.stringify(data));
 
@@ -82,9 +80,8 @@ async function loadDrafts() {
         const card = list.querySelector(`.card[data-id="${id}"]`);
         card.querySelectorAll('button').forEach((b) => (b.disabled = true));
 
-        const endpoint = action === 'approve' ? 'instagram-approve' : 'instagram-reject';
         try {
-          const res = await fetch(`/api/${endpoint}?id=${id}&secret=${encodeURIComponent(secret)}`);
+          const res = await fetch(`/api/instagram-drafts?id=${id}&action=${action}&secret=${encodeURIComponent(secret)}`);
           if (!res.ok) throw new Error('Request failed (' + res.status + ')');
 
           const overlay = document.createElement('div');

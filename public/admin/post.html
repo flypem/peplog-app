@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flyptide — Schedule Instagram Posts</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; background: #FAFAF8; color: #1C2B33; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: #8A9299; font-size: 13px; margin-top: 0; margin-bottom: 24px; }
+  label { font-size: 12px; color: #5B646C; display: block; margin-bottom: 4px; font-weight: 600; }
+  textarea, input[type=password], input[type=datetime-local] { width: 100%; padding: 10px; border: 1px solid #DEDBD2; border-radius: 8px; font-size: 14px; box-sizing: border-box; margin-bottom: 16px; font-family: inherit; }
+  textarea { height: 160px; resize: vertical; }
+  input[type=file] { margin-bottom: 12px; }
+  img#preview { max-width: 100%; border-radius: 8px; margin-bottom: 8px; display: none; border: 1px solid #DEDBD2; }
+  #captionSource { font-size: 11px; color: #8A9299; margin-bottom: 16px; display: none; }
+  button { width: 100%; padding: 13px; background: #127D77; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 10px; }
+  button.secondary { background: white; color: #1C2B33; border: 1px solid #DEDBD2; }
+  button:disabled { background: #B7BEC4; cursor: default; }
+  #status { margin-top: 14px; font-size: 13px; white-space: pre-wrap; line-height: 1.5; }
+  .ok { color: #127D77; } .err { color: #C0392B; }
+</style>
+</head>
+<body>
+<h1>Schedule an Instagram Post</h1>
+<p class="sub">This is your one approval step — once scheduled, it publishes itself automatically at the time below.</p>
+
+<label>Your publish secret</label>
+<input type="password" id="secret" placeholder="Paste your INSTAGRAM_PUBLISH_SECRET" autocomplete="off">
+
+<label>Image</label>
+<input type="file" id="imageFile" accept="image/*">
+<img id="preview">
+<div id="captionSource">📎 Caption auto-filled from image — edit freely below</div>
+
+<label>Caption</label>
+<textarea id="caption" placeholder="Choose an image with an embedded caption, or write one here..."></textarea>
+
+<label>Publish at</label>
+<input type="datetime-local" id="scheduledFor">
+
+<button id="scheduleBtn">Approve &amp; Schedule</button>
+<button id="publishNowBtn" class="secondary">Or Publish Right Now Instead</button>
+<div id="status"></div>
+
+<script>
+const fileInput = document.getElementById('imageFile');
+const preview = document.getElementById('preview');
+const captionBox = document.getElementById('caption');
+const captionSource = document.getElementById('captionSource');
+let imageBase64 = null;
+
+const savedSecret = sessionStorage.getItem('ig_secret');
+if (savedSecret) document.getElementById('secret').value = savedSecret;
+
+const dtInput = document.getElementById('scheduledFor');
+const defaultTime = new Date(Date.now() + 60 * 60 * 1000);
+dtInput.value = defaultTime.toISOString().slice(0, 16);
+
+async function extractPngCaption(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const view = new DataView(buf);
+    if (view.getUint32(0) !== 0x89504e47) return null;
+    let offset = 8;
+    while (offset + 8 <= buf.byteLength) {
+      const length = view.getUint32(offset);
+      const type = String.fromCharCode(view.getUint8(offset+4), view.getUint8(offset+5), view.getUint8(offset+6), view.getUint8(offset+7));
+      if (type === 'tEXt') {
+        const bytes = new Uint8Array(buf, offset + 8, length);
+        const text = new TextDecoder().decode(bytes);
+        const nullIdx = text.indexOf('\0');
+        if (nullIdx !== -1 && text.slice(0, nullIdx) === 'Caption') return text.slice(nullIdx + 1);
+      }
+      if (type === 'IEND') break;
+      offset += 8 + length + 4;
+    }
+  } catch (e) {}
+  return null;
+}
+
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    imageBase64 = e.target.result;
+    preview.src = imageBase64;
+    preview.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+
+  const embeddedCaption = await extractPngCaption(file);
+  if (embeddedCaption) {
+    captionBox.value = embeddedCaption;
+    captionSource.style.display = 'block';
+  } else {
+    captionSource.style.display = 'none';
+  }
+});
+
+async function uploadImage(secret) {
+  const uploadRes = await fetch('/api/instagram-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-publish-secret': secret },
+    body: JSON.stringify({ imageBase64, filename: fileInput.files[0].name }),
+  });
+  const uploadData = await uploadRes.json();
+  if (!uploadRes.ok) throw new Error(JSON.stringify(uploadData));
+  return uploadData.url;
+}
+
+async function run(mode) {
+  const secret = document.getElementById('secret').value;
+  const caption = captionBox.value;
+  const status = document.getElementById('status');
+  const scheduleBtn = document.getElementById('scheduleBtn');
+  const publishNowBtn = document.getElementById('publishNowBtn');
+
+  if (!secret) return alert('Enter your publish secret first');
+  if (!imageBase64) return alert('Choose an image first');
+
+  sessionStorage.setItem('ig_secret', secret);
+  scheduleBtn.disabled = true;
+  publishNowBtn.disabled = true;
+  status.className = '';
+  status.textContent = 'Uploading image...';
+
+  try {
+    const url = await uploadImage(secret);
+
+    if (mode === 'schedule') {
+      status.textContent = 'Scheduling...';
+      const scheduledFor = new Date(dtInput.value).toISOString();
+      const res = await fetch('/api/instagram-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-publish-secret': secret },
+        body: JSON.stringify({ imageUrl: url, caption, scheduledFor }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(JSON.stringify(data));
+      status.className = 'ok';
+      status.textContent = '✅ Scheduled for ' + new Date(data.scheduledFor).toLocaleString() + ' — it will post itself automatically.';
+    } else {
+      status.textContent = 'Publishing now...';
+      const res = await fetch('/api/instagram-publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-publish-secret': secret },
+        body: JSON.stringify({ imageUrl: url, caption }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(JSON.stringify(data));
+      status.className = 'ok';
+      status.textContent = '✅ Published! Post ID: ' + data.postId;
+    }
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = '❌ ' + err.message;
+  } finally {
+    scheduleBtn.disabled = false;
+    publishNowBtn.disabled = false;
+  }
+}
+
+document.getElementById('scheduleBtn').addEventListener('click', () => run('schedule'));
+document.getElementById('publishNowBtn').addEventListener('click', () => run('now'));
+</script>
+</body>
+</html>
