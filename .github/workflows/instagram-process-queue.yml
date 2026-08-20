@@ -1,0 +1,21 @@
+name: Instagram Scheduled Post Publisher
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish anything due
+        run: |
+          STATUS=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            "https://www.flyptide.app/api/instagram-process-queue?secret=${{ secrets.INSTAGRAM_ADMIN_SECRET }}")
+          echo "HTTP status: $STATUS"
+          cat /tmp/response.txt
+          if [ "$STATUS" -ge 400 ]; then
+            echo "Queue processing failed"
+            exit 1
+          fi
