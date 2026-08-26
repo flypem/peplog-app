@@ -12,7 +12,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Instagram isn't connected yet." });
   }
 
-  // Find everything approved and due, oldest first.
   const { data: due, error: fetchError } = await supabaseAdmin
     .from("scheduled_posts")
     .select("*")
@@ -28,14 +27,15 @@ export default async function handler(req, res) {
   const results = [];
   for (const post of due) {
     try {
+      const urls = post.image_urls && post.image_urls.length > 0 ? post.image_urls : [post.image_url];
       const postId = await publishToInstagram({
         igUserId: creds.ig_user_id,
         accessToken: creds.access_token,
-        imageUrl: post.image_url,
+        imageUrls: urls,
         caption: post.caption,
       });
       await supabaseAdmin.from("scheduled_posts").update({ status: "posted", post_id: postId }).eq("id", post.id);
-      results.push({ id: post.id, status: "posted", postId });
+      results.push({ id: post.id, status: "posted", postId, images: urls.length });
     } catch (err) {
       await supabaseAdmin.from("scheduled_posts").update({ status: "failed", error: err.message }).eq("id", post.id);
       results.push({ id: post.id, status: "failed", error: err.message });

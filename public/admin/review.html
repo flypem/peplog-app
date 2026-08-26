@@ -10,7 +10,11 @@
   p.sub { color: #8A9299; font-size: 13px; margin-top: 0; margin-bottom: 20px; }
   input[type=password] { width: 100%; padding: 10px; border: 1px solid #DEDBD2; border-radius: 8px; font-size: 14px; box-sizing: border-box; margin-bottom: 20px; font-family: inherit; }
   .card { border: 1px solid #DEDBD2; border-radius: 10px; padding: 14px; margin-bottom: 14px; background: white; position: relative; }
-  .card img { width: 100%; border-radius: 8px; margin-bottom: 10px; display: block; }
+  .imgs { display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; }
+  .imgs img { border-radius: 8px; display: block; flex-shrink: 0; object-fit: cover; }
+  .imgs.single img { width: 100%; }
+  .imgs.multi img { width: 96px; height: 96px; }
+  .badge { display: inline-block; background: #EAF2FD; color: #2A6FB0; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-bottom: 6px; letter-spacing: 0.3px; }
   .card .when { color: #127D77; font-weight: 600; font-size: 12px; margin-bottom: 6px; }
   .card .cap { font-size: 13px; color: #5B646C; line-height: 1.5; margin-bottom: 12px; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
   .card .actions { display: flex; gap: 8px; }
@@ -58,12 +62,16 @@ async function loadDrafts() {
 
     list.innerHTML = '';
     for (const d of data.drafts) {
+      const urls = (d.image_urls && d.image_urls.length > 0) ? d.image_urls : (d.image_url ? [d.image_url] : []);
+      const isCarousel = urls.length > 1;
       const when = new Date(d.scheduled_for).toLocaleString(undefined, { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
       const card = document.createElement('div');
       card.className = 'card';
       card.dataset.id = d.id;
+      const imgsHtml = urls.map((u) => `<img src="${u}">`).join('');
       card.innerHTML = `
-        <img src="${d.image_url}">
+        ${isCarousel ? `<span class="badge">CAROUSEL · ${urls.length} IMAGES</span>` : ''}
+        <div class="imgs ${isCarousel ? 'multi' : 'single'}">${imgsHtml}</div>
         <div class="when">${when}</div>
         <div class="cap">${(d.caption || '').replace(/</g, '&lt;')}</div>
         <div class="actions">

@@ -6,21 +6,22 @@ function page(title, message, color) {
 }
 
 export default async function handler(req, res) {
-  // POST — direct single-post scheduling (used by the "Approve & Schedule"
-  // button on post.html, already-approved-by-a-human, so it goes straight
-  // to "pending" rather than "draft").
+  // POST — direct single/carousel scheduling (used by the "Approve &
+  // Schedule" button on post.html, already-approved-by-a-human, so it goes
+  // straight to "pending" rather than "draft").
   if (req.method === "POST") {
     const secret = req.headers["x-publish-secret"];
     if (!process.env.INSTAGRAM_PUBLISH_SECRET || secret !== process.env.INSTAGRAM_PUBLISH_SECRET) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    const { imageUrl, caption, scheduledFor } = req.body || {};
-    if (!imageUrl || !scheduledFor) {
-      return res.status(400).json({ error: "imageUrl and scheduledFor are required" });
+    const { imageUrl, imageUrls, caption, scheduledFor } = req.body || {};
+    const urls = Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls : imageUrl ? [imageUrl] : null;
+    if (!urls || !scheduledFor) {
+      return res.status(400).json({ error: "imageUrl(s) and scheduledFor are required" });
     }
     const { data, error } = await supabaseAdmin
       .from("scheduled_posts")
-      .insert({ image_url: imageUrl, caption: caption || "", scheduled_for: scheduledFor, status: "pending" })
+      .insert({ image_urls: urls, caption: caption || "", scheduled_for: scheduledFor, status: "pending" })
       .select()
       .single();
     if (error) return res.status(400).json({ error: error.message });
@@ -28,7 +29,6 @@ export default async function handler(req, res) {
   }
 
   // GET — list drafts (no id), or approve/reject a specific one (id + action).
-  // Used by the review page. Admin-secret protected.
   const { secret, id, action } = req.query;
   if (!process.env.INSTAGRAM_ADMIN_SECRET || secret !== process.env.INSTAGRAM_ADMIN_SECRET) {
     return res.status(403).json({ error: "Forbidden" });
