@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flyptide — Queue a Carousel</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; background: #FAFAF8; color: #1C2B33; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: #8A9299; font-size: 13px; margin-top: 0; margin-bottom: 24px; }
+  label { font-size: 12px; color: #5B646C; display: block; margin-bottom: 4px; font-weight: 600; }
+  textarea, input[type=password], input[type=datetime-local] { width: 100%; padding: 10px; border: 1px solid #DEDBD2; border-radius: 8px; font-size: 14px; box-sizing: border-box; margin-bottom: 16px; font-family: inherit; }
+  textarea { height: 160px; resize: vertical; }
+  input[type=file] { margin-bottom: 12px; }
+  #captionSource { font-size: 11px; color: #8A9299; margin-bottom: 16px; display: none; }
+  .thumbs { display: flex; gap: 6px; margin-bottom: 16px; overflow-x: auto; }
+  .thumbs img { width: 90px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid #DEDBD2; flex-shrink: 0; }
+  .thumbs .num { position: relative; }
+  .thumbs .num::after { content: attr(data-n); position: absolute; top: 4px; left: 4px; background: rgba(28,43,51,0.75); color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+  button { width: 100%; padding: 13px; background: #127D77; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:disabled { background: #B7BEC4; cursor: default; }
+  #status { margin-top: 14px; font-size: 13px; white-space: pre-wrap; line-height: 1.5; }
+  .ok { color: #127D77; } .err { color: #C0392B; }
+</style>
+</head>
+<body>
+<h1>Queue a Carousel</h1>
+<p class="sub">Select all slide images in order (slide 1 first) — they'll be published together as one carousel post.</p>
+
+<label>Your publish secret</label>
+<input type="password" id="secret" placeholder="Paste your INSTAGRAM_PUBLISH_SECRET" autocomplete="off">
+
+<label>Carousel images (select in order — first file = slide 1)</label>
+<input type="file" id="imageFiles" accept="image/*" multiple>
+<div class="thumbs" id="thumbs"></div>
+<div id="captionSource">📎 Caption auto-filled from slide 1's embedded metadata</div>
+
+<label>Caption</label>
+<textarea id="caption" placeholder="Caption for the whole carousel..."></textarea>
+
+<label>Publish at</label>
+<input type="datetime-local" id="scheduledFor">
+
+<button id="scheduleBtn">Approve &amp; Schedule Carousel</button>
+<div id="status"></div>
+
+<script>
+const secretInput = document.getElementById('secret');
+const savedSecret = sessionStorage.getItem('ig_secret');
+if (savedSecret) secretInput.value = savedSecret;
+
+const dtInput = document.getElementById('scheduledFor');
+const defaultTime = new Date(Date.now() + 60 * 60 * 1000);
+dtInput.value = defaultTime.toISOString().slice(0, 16);
+
+const filesInput = document.getElementById('imageFiles');
+const thumbs = document.getElementById('thumbs');
+const captionBox = document.getElementById('caption');
+const captionSource = document.getElementById('captionSource');
+let slides = []; // { file, dataUrl }
+
+async function extractPngCaption(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const view = new DataView(buf);
+    if (view.getUint32(0) !== 0x89504e47) return null;
+    let offset = 8;
+    while (offset + 8 <= buf.byteLength) {
+      const length = view.getUint32(offset);
+      const type = String.fromCharCode(view.getUint8(offset+4), view.getUint8(offset+5), view.getUint8(offset+6), view.getUint8(offset+7));
+      if (type === 'tEXt') {
+        const bytes = new Uint8Array(buf, offset + 8, length);
+        const text = new TextDecoder().decode(bytes);
+        const nullIdx = text.indexOf('\0');
+        if (nullIdx !== -1 && text.slice(0, nullIdx) === 'Caption') return text.slice(nullIdx + 1);
+      }
+      if (type === 'IEND') break;
+      offset += 8 + length + 4;
+    }
+  } catch (e) {}
+  return null;
+}
+
+filesInput.addEventListener('change', async () => {
+  slides = [];
+  thumbs.innerHTML = '';
+  const files = Array.from(filesInput.files);
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const dataUrl = await new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = (e) => resolve(e.target.result);
+      r.readAsDataURL(file);
+    });
+    slides.push({ file, dataUrl });
+
+    const div = document.createElement('div');
+    div.className = 'num';
+    div.setAttribute('data-n', i + 1);
+    div.innerHTML = `<img src="${dataUrl}">`;
+    thumbs.appendChild(div);
+  }
+
+  // Caption comes from slide 1 only, matching how these are generated.
+  if (files.length > 0) {
+    const embeddedCaption = await extractPngCaption(files[0]);
+    if (embeddedCaption) {
+      captionBox.value = embeddedCaption;
+      captionSource.style.display = 'block';
+    } else {
+      captionSource.style.display = 'none';
+    }
+  }
+});
+
+document.getElementById('scheduleBtn').addEventListener('click', async () => {
+  const secret = secretInput.value;
+  const caption = captionBox.value;
+  const status = document.getElementById('status');
+  const btn = document.getElementById('scheduleBtn');
+
+  if (!secret) return alert('Enter your publish secret first');
+  if (slides.length < 2) return alert('Choose at least 2 images for a carousel (use post.html for a single image)');
+  if (slides.length > 10) return alert('Instagram carousels support a maximum of 10 images');
+
+  sessionStorage.setItem('ig_secret', secret);
+  btn.disabled = true;
+  status.className = '';
+  status.textContent = `Uploading ${slides.length} images...`;
+
+  try {
+    const imageUrls = [];
+    for (let i = 0; i < slides.length; i++) {
+      status.textContent = `Uploading image ${i + 1} of ${slides.length}...`;
+      const res = await fetch('/api/instagram-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-publish-secret': secret },
+        body: JSON.stringify({ imageBase64: slides[i].dataUrl, filename: slides[i].file.name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(JSON.stringify(data));
+      imageUrls.push(data.url);
+    }
+
+    status.textContent = 'Scheduling carousel...';
+    const scheduledFor = new Date(dtInput.value).toISOString();
+    const res = await fetch('/api/instagram-drafts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-publish-secret': secret },
+      body: JSON.stringify({ imageUrls, caption, scheduledFor }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+
+    status.className = 'ok';
+    status.textContent = `✅ Carousel (${slides.length} slides) scheduled for ${new Date(data.scheduledFor).toLocaleString()} — it will post itself automatically.`;
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = '❌ ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
