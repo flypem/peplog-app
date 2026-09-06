@@ -257,6 +257,7 @@ export default function Flyptide() {
   const [desiredUnits, setDesiredUnits] = useState("");
 
   const [logModalVial, setLogModalVial] = useState(null);
+  const [logModalDate, setLogModalDate] = useState(null); // "YYYY-MM-DD", set when opened from the calendar
   const [editingVial, setEditingVial] = useState(null);
   const [changeDoseVial, setChangeDoseVial] = useState(null);
 
@@ -603,7 +604,17 @@ export default function Flyptide() {
             onChangeDose={(v) => setChangeDoseVial(v)}
           />
         )}
-        {tab === "log" && <LogTab log={log} vials={vials} isPro={isPro} onExport={handleExport} onUpdateEntry={updateLogEntry} onDeleteEntry={deleteLogEntry} />}
+        {tab === "log" && (
+          <LogTab
+            log={log}
+            vials={vials}
+            isPro={isPro}
+            onExport={handleExport}
+            onUpdateEntry={updateLogEntry}
+            onDeleteEntry={deleteLogEntry}
+            onAddEntry={(vial, date) => { setLogModalVial(vial); setLogModalDate(date); }}
+          />
+        )}
         {tab === "account" && (
           <AccountTab
             isPro={isPro}
@@ -647,7 +658,8 @@ export default function Flyptide() {
           sites={allSites}
           suggested={nextSite(log, allSites)}
           syringePref={syringePref}
-          onClose={() => setLogModalVial(null)}
+          initialDate={logModalDate}
+          onClose={() => { setLogModalVial(null); setLogModalDate(null); }}
           onConfirm={(site, whenIso, notes) => logDose(logModalVial, site, whenIso, notes)}
           onAddSite={addCustomSite}
         />
@@ -1109,7 +1121,7 @@ function InventoryTab({ vials, vialStats, isPro, onAdd, onRemove, onLog, onToggl
 }
 
 // ---------- Log tab ----------
-function LogTab({ log, vials, isPro, onExport, onUpdateEntry, onDeleteEntry }) {
+function LogTab({ log, vials, isPro, onExport, onUpdateEntry, onDeleteEntry, onAddEntry }) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -1204,9 +1216,11 @@ function LogTab({ log, vials, isPro, onExport, onUpdateEntry, onDeleteEntry }) {
             <DayDetailPanel
               date={selectedDate}
               entries={entriesByDate[selectedDate] || []}
+              vials={vials}
               onClose={() => setSelectedDate(null)}
               onUpdateEntry={onUpdateEntry}
               onDeleteEntry={onDeleteEntry}
+              onAddEntry={onAddEntry}
             />
           )}
         </>
@@ -1215,14 +1229,22 @@ function LogTab({ log, vials, isPro, onExport, onUpdateEntry, onDeleteEntry }) {
   );
 }
 
-function DayDetailPanel({ date, entries, onClose, onUpdateEntry, onDeleteEntry }) {
+function DayDetailPanel({ date, entries, vials, onClose, onUpdateEntry, onDeleteEntry, onAddEntry }) {
   const [editingId, setEditingId] = useState(null);
   const [editSite, setEditSite] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [pickingVial, setPickingVial] = useState(false);
 
   const dateLabel = new Date(date + "T12:00:00").toLocaleDateString(undefined, {
     weekday: "long", month: "long", day: "numeric", year: "numeric",
+  });
+
+  // Only offer vials that actually existed by this date — logging a dose
+  // for an item before it was created doesn't make sense.
+  const eligibleVials = (vials || []).filter((v) => {
+    const created = v.createdAt ? localDateStr(new Date(v.createdAt)) : null;
+    return !created || created <= date;
   });
 
   function startEdit(entry) {
@@ -1237,6 +1259,11 @@ function DayDetailPanel({ date, entries, onClose, onUpdateEntry, onDeleteEntry }
     setEditingId(null);
   }
 
+  function pickVial(vial) {
+    setPickingVial(false);
+    onAddEntry(vial, date);
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(28,43,51,0.4)" }} onClick={onClose}>
       <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto" style={{ background: PAPER }} onClick={(e) => e.stopPropagation()}>
@@ -1248,7 +1275,7 @@ function DayDetailPanel({ date, entries, onClose, onUpdateEntry, onDeleteEntry }
         {entries.length === 0 ? (
           <p className="text-xs text-center py-8" style={{ color: "#8A9299" }}>Nothing logged this day.</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 mb-3">
             {entries.map((entry) => (
               <div key={entry.id} className="rounded-xl p-3" style={{ background: "white", border: `1px solid ${LINE}` }}>
                 {editingId === entry.id ? (
@@ -1296,6 +1323,42 @@ function DayDetailPanel({ date, entries, onClose, onUpdateEntry, onDeleteEntry }
               </div>
             ))}
           </div>
+        )}
+
+        {pickingVial ? (
+          <div className="rounded-xl p-3" style={{ background: "white", border: `1px solid ${LINE}` }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold">Log which item?</p>
+              <button onClick={() => setPickingVial(false)}><X size={15} color="#8A9299" /></button>
+            </div>
+            {eligibleVials.length === 0 ? (
+              <p className="text-[11px]" style={{ color: "#8A9299" }}>No items existed yet on this date.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {eligibleVials.map((v) => {
+                  const Icon = typeIcon(getType(v));
+                  return (
+                    <button
+                      key={v.id}
+                      onClick={() => pickVial(v)}
+                      className="w-full flex items-center gap-2 rounded-lg py-2 px-2.5 text-xs font-medium"
+                      style={{ background: "#F3F2EE", color: INK }}
+                    >
+                      <Icon size={14} /> {v.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={() => setPickingVial(true)}
+            className="w-full rounded-xl py-2.5 text-xs font-medium flex items-center justify-center gap-1"
+            style={{ border: `1px dashed ${LINE}`, color: TEAL }}
+          >
+            <Plus size={13} /> Add entry for this day
+          </button>
         )}
       </div>
     </div>
@@ -1501,13 +1564,13 @@ function FeatureRow({ label, included, free }) {
 }
 
 // ---------- Log modal ----------
-function LogModal({ vial, stats, sites, suggested, syringePref, onClose, onConfirm, onAddSite }) {
+function LogModal({ vial, stats, sites, suggested, syringePref, initialDate, onClose, onConfirm, onAddSite }) {
   const isCapsule = stats.type === "capsule";
   const [site, setSite] = useState(suggested);
   const [newSite, setNewSite] = useState("");
-  const [showMore, setShowMore] = useState(false);
   const today = localDateStr(new Date());
-  const [whenDate, setWhenDate] = useState(today);
+  const [whenDate, setWhenDate] = useState(initialDate || today);
+  const [showMore, setShowMore] = useState(!!initialDate && initialDate !== today);
   const [notes, setNotes] = useState("");
   const scale = resolveScale(stats.currentUnits || 0, syringePref);
   const createdAtDate = vial.createdAt ? new Date(vial.createdAt) : null;
