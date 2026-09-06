@@ -486,6 +486,29 @@ export default function Flyptide() {
     setLogModalVial(null);
   }
 
+  function updateLogEntry(entryId, updates) {
+    setLog((prev) => prev.map((e) => (e.id === entryId ? { ...e, ...updates } : e)));
+  }
+
+  // Deleting a logged dose must reverse whatever it added to the vial's
+  // running totals, or remaining-supply calculations go stale. Recomputes
+  // via toMcg the same way logDose originally computed it — safe for every
+  // item type (capsules pass through unchanged, same as at creation time).
+  function deleteLogEntry(entryId) {
+    const entry = log.find((e) => e.id === entryId);
+    if (!entry) return;
+    const mcgAmount = toMcg(entry.doseAmount, entry.doseUnit);
+    setLog((prev) => prev.filter((e) => e.id !== entryId));
+    if (entry.vialId) {
+      setVials((prev) => prev.map((v) => (v.id === entry.vialId ? {
+        ...v,
+        dosesUsed: Math.max(0, (v.dosesUsed || 0) - 1),
+        mcgUsedCurrentVial: Math.max(0, (v.mcgUsedCurrentVial || 0) - mcgAmount),
+        mcgUsedTotal: Math.max(0, (v.mcgUsedTotal || 0) - mcgAmount),
+      } : v)));
+    }
+  }
+
   function vialStats(v) {
     const now = Date.now();
     const type = getType(v);
@@ -580,7 +603,7 @@ export default function Flyptide() {
             onChangeDose={(v) => setChangeDoseVial(v)}
           />
         )}
-        {tab === "log" && <LogTab log={log} isPro={isPro} onExport={handleExport} />}
+        {tab === "log" && <LogTab log={log} vials={vials} isPro={isPro} onExport={handleExport} onUpdateEntry={updateLogEntry} onDeleteEntry={deleteLogEntry} />}
         {tab === "account" && (
           <AccountTab
             isPro={isPro}
@@ -1086,7 +1109,43 @@ function InventoryTab({ vials, vialStats, isPro, onAdd, onRemove, onLog, onToggl
 }
 
 // ---------- Log tab ----------
-function LogTab({ log, isPro, onExport }) {
+function LogTab({ log, vials, isPro, onExport, onUpdateEntry, onDeleteEntry }) {
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD" or null
+
+  const entriesByDate = useMemo(() => {
+    const map = {};
+    for (const e of log) {
+      const key = localDateStr(new Date(e.date));
+      (map[key] = map[key] || []).push(e);
+    }
+    return map;
+  }, [log]);
+
+  const todayKey = localDateStr(new Date());
+
+  function changeMonth(delta) {
+    setViewMonth((prev) => {
+      let m = prev.month + delta;
+      let y = prev.year;
+      if (m < 0) { m = 11; y -= 1; }
+      else if (m > 11) { m = 0; y += 1; }
+      return { year: y, month: m };
+    });
+  }
+
+  const firstOfMonth = new Date(viewMonth.year, viewMonth.month, 1);
+  const daysInMonth = new Date(viewMonth.year, viewMonth.month + 1, 0).getDate();
+  const startOffset = firstOfMonth.getDay();
+  const monthLabel = firstOfMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
@@ -1095,31 +1154,150 @@ function LogTab({ log, isPro, onExport }) {
           {isPro ? <Download size={12} /> : <Lock size={11} />} Export CSV
         </button>
       </div>
+
       {!log.length ? (
         <EmptyState icon={Clock} title="No doses logged yet" body="Log a dose from your inventory to build your history and site rotation." />
       ) : (
-        <div className="space-y-2">
-          {log.map((entry) => (
-            <div key={entry.id} className="rounded-xl p-3" style={{ background: "white", border: `1px solid ${LINE}` }}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">{entry.name}</p>
-                  {entry.site && (
-                    <p className="text-[11px] flex items-center gap-1 mt-0.5" style={{ color: "#8A9299" }}><MapPin size={11} /> {entry.site}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="text-xs font-mono">{entry.doseAmount}{entry.doseUnit === "capsule" ? " caps" : entry.doseUnit}</p>
-                  <p className="text-[10px]" style={{ color: "#8A9299" }}>{new Date(entry.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p>
-                </div>
-              </div>
-              {entry.notes && (
-                <p className="text-[11px] mt-1.5 pt-1.5" style={{ color: "#6B7680", borderTop: `1px solid ${LINE}` }}>{entry.notes}</p>
-              )}
+        <>
+          <div className="rounded-2xl p-3" style={{ background: "white", border: `1px solid ${LINE}` }}>
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={() => changeMonth(-1)} className="p-1.5 rounded-lg" style={{ background: "#F3F2EE" }} aria-label="Previous month">
+                <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
+              </button>
+              <p className="text-sm font-semibold">{monthLabel}</p>
+              <button onClick={() => changeMonth(1)} className="p-1.5 rounded-lg" style={{ background: "#F3F2EE" }} aria-label="Next month">
+                <ChevronRight size={14} />
+              </button>
             </div>
-          ))}
-        </div>
+            <div className="grid grid-cols-7 gap-1 mb-1">
+              {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                <p key={i} className="text-center text-[10px] font-medium" style={{ color: "#8A9299" }}>{d}</p>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {cells.map((d, i) => {
+                if (d === null) return <div key={i} />;
+                const key = `${viewMonth.year}-${String(viewMonth.month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                const hasEntry = !!entriesByDate[key];
+                const isToday = key === todayKey;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedDate(key)}
+                    className="aspect-square rounded-lg flex flex-col items-center justify-center relative"
+                    style={{
+                      background: isToday ? "#EAF2FD" : "transparent",
+                      color: INK,
+                    }}
+                  >
+                    <span className="text-xs">{d}</span>
+                    {hasEntry && (
+                      <span className="absolute bottom-1 w-1 h-1 rounded-full" style={{ background: TEAL }} />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {selectedDate && (
+            <DayDetailPanel
+              date={selectedDate}
+              entries={entriesByDate[selectedDate] || []}
+              onClose={() => setSelectedDate(null)}
+              onUpdateEntry={onUpdateEntry}
+              onDeleteEntry={onDeleteEntry}
+            />
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+function DayDetailPanel({ date, entries, onClose, onUpdateEntry, onDeleteEntry }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editSite, setEditSite] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const dateLabel = new Date(date + "T12:00:00").toLocaleDateString(undefined, {
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
+  });
+
+  function startEdit(entry) {
+    setEditingId(entry.id);
+    setEditSite(entry.site || "");
+    setEditNotes(entry.notes || "");
+    setConfirmDeleteId(null);
+  }
+
+  function saveEdit(entry) {
+    onUpdateEntry(entry.id, { site: editSite.trim() || null, notes: editNotes.trim() });
+    setEditingId(null);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(28,43,51,0.4)" }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto" style={{ background: PAPER }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm">{dateLabel}</h3>
+          <button onClick={onClose}><X size={18} color="#8A9299" /></button>
+        </div>
+
+        {entries.length === 0 ? (
+          <p className="text-xs text-center py-8" style={{ color: "#8A9299" }}>Nothing logged this day.</p>
+        ) : (
+          <div className="space-y-2">
+            {entries.map((entry) => (
+              <div key={entry.id} className="rounded-xl p-3" style={{ background: "white", border: `1px solid ${LINE}` }}>
+                {editingId === entry.id ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">
+                      {entry.name} — {entry.doseAmount}{entry.doseUnit === "capsule" ? " caps" : entry.doseUnit}
+                    </p>
+                    <input value={editSite} onChange={(e) => setEditSite(e.target.value)} placeholder="Site (optional)" style={inputStyle} className="w-full text-xs" />
+                    <input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Notes (optional)" style={inputStyle} className="w-full text-xs" />
+                    <div className="flex gap-2">
+                      <button onClick={() => saveEdit(entry)} className="flex-1 rounded-lg py-2 text-xs font-medium text-white" style={{ background: TEAL }}>Save</button>
+                      <button onClick={() => setEditingId(null)} className="flex-1 rounded-lg py-2 text-xs font-medium" style={{ background: "#F3F2EE", color: INK }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{entry.name}</p>
+                        {entry.site && (
+                          <p className="text-[11px] flex items-center gap-1 mt-0.5" style={{ color: "#8A9299" }}><MapPin size={11} /> {entry.site}</p>
+                        )}
+                      </div>
+                      <p className="text-xs font-mono">{entry.doseAmount}{entry.doseUnit === "capsule" ? " caps" : entry.doseUnit}</p>
+                    </div>
+                    {entry.notes && (
+                      <p className="text-[11px] mt-1.5 pt-1.5" style={{ color: "#6B7680", borderTop: `1px solid ${LINE}` }}>{entry.notes}</p>
+                    )}
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => startEdit(entry)} className="flex-1 rounded-lg py-1.5 text-[11px] font-medium flex items-center justify-center gap-1" style={{ background: "#F3F2EE", color: INK }}>
+                        <Pencil size={11} /> Edit
+                      </button>
+                      {confirmDeleteId === entry.id ? (
+                        <button onClick={() => { onDeleteEntry(entry.id); setConfirmDeleteId(null); }} className="flex-1 rounded-lg py-1.5 text-[11px] font-medium text-white" style={{ background: "#C0392B" }}>
+                          Confirm delete
+                        </button>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteId(entry.id)} className="flex-1 rounded-lg py-1.5 text-[11px] font-medium flex items-center justify-center gap-1" style={{ background: "#F3F2EE", color: "#C0392B" }}>
+                          <Trash2 size={11} /> Delete
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
